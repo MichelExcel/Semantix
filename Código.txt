@@ -1,0 +1,146 @@
+#Código utilizado para a solução do teste enviado pela Semantix
+#Executado em Jupyter Notebook (na versão 3.7.0 do Python)
+
+from pyspark import SparkContext, SparkConf
+import pandas as pd
+
+#Obs: foi removida a última linha do txt pois parecia incompleta com o seguinte conteúdo: alyssa.p
+
+conf = SparkConf().setAppName('TesteSemantix').setMaster('local') 
+sc = SparkContext.getOrCreate(conf)
+
+numPartitions = 4
+pathFile = 'C:\\Users\miche\Desktop\Semantix\Processo Seletivo\Bases\Dados.txt'
+
+lines = sc.textFile(pathFile, numPartitions) #dados importados e distribuídos nas partições
+
+#Os dados poderiam ser 'splitados' se houvesse um separador (como um CSV) utilizando algo assim:
+#parts = lines.map(lambda line: line.replace(' - - ', ' ').split(','))
+   
+def splitStrInList(str):
+    #'Splita' os dados em uma lista. Do timestamp apenas a data está sendo extraída
+    #Por conta das ausência de um separador claro foi criada esta função para separar os dados.
+    splt = str.split('"')
+    
+    #Existem alguns casos especiais com aspas duplas entre as aspas duplas da requisição.
+    #Para tratá-los foi criada outra função que 'splita' os dados de outra forma.
+    if len(splt) > 3:
+        return splitStrInList_2(str)
+    ret = []
+    for k in range(3):
+        if k == 0:
+            splt2 = splt[0].strip().split(' - - [')
+            ret.append(splt2[0])
+            ret.append(splt2[1][:splt2[1].find(":")])
+            #ret = splt[0].strip().split(' - - ')
+        elif k == 1:
+            ret.append(splt[1])
+        elif k == 2:
+            ret.extend(splt[2].strip().split(' '))
+            if ret[4] != '-':
+                ret[4]=int(ret[4])
+            else:
+                ret[4]=0
+    return ret
+
+def splitStrInList_2(str):
+    #'Splita' os dados em uma lista.
+    #Esta função é muito mais lenta que a anterior e só é utilizada 
+    #nos raros casos de exceção onde existem 3 ou mais aspas duplas.
+    ret = []
+    start = 0
+    end = str.find(" ")
+    ret.append(str[start:end])
+    start,end = str.find("[",end)+1,str.find(":")
+    ret.append(str[start:end])
+    lastSpace = str.rfind(" ")
+    start,end = str.find("]",end)+3,str.rfind(" ",0,lastSpace)-1
+    ret.append(str[start:end])
+    ret.append(str[end+1:lastSpace])
+    byte = str[lastSpace+1:]
+    if byte != '-':
+        ret.append(int(byte))
+    else:
+        ret.append(0)
+    return ret
+
+#cria um iterador que contém todos os elementos do RDD
+allData = [x for x in lines.toLocalIterator()]
+
+#Converte os dados em array (lista de listas)
+dataArray = []
+for row in allData:
+    dataArray.append(splitStrInList(row))
+    
+#Converte a array em um dataframe
+df = pd.DataFrame(dataArray, columns=['Host','Timestamp','Requisition','HTTP','Bytes'])
+
+#display(df) #Mostra dados do dataframe
+
+#RESPOSTAS DO TESTE PROPOSTO
+
+#1 - Número de hosts únicos
+print ("1) Número de hosts únicos: " + str('{0:,}'.format(df.Host.nunique()).replace(',','.'))+"\n") #Quantidade
+
+#Questão 2 - O total de erros 404.
+print("2) Total de erros 404: " + str('{0:,}'.format((df.HTTP == '404').sum()).replace(',','.'))+"\n ") #Quantidade
+
+#Questão 3 - Os URLs que mais causaram erros 404
+print("3) As 5 URLs que mais causaram erro são:")
+df3 = df[df.HTTP == '404'] #filtra HTTPs 404
+df3 = pd.pivot_table(df3, index=["Host"], values= ["HTTP"], aggfunc=len) #Cria PivotTable agregando host
+df3 = df3.sort_values(by=['HTTP'], ascending=False).head(5) #Ordena e exibe 5 primeiros
+display(df3)
+print()
+
+#4 - Quantidade de erros 404 por dia
+print("4) As quantidades de erros 404 nos 20 últimos dias foram:")
+df4 = df[df.HTTP == '404'] #filtra HTTPs 404
+df4 = pd.pivot_table(df4, index=["Timestamp"], values= ["HTTP"], aggfunc=len) #Cria PivotTable agregando timestamp
+df4 = df4.sort_values(by=['Timestamp'], ascending=False).head(20) #Ordena e exibe 20 mais recentes
+display(df4)
+print()
+
+#5 - O total de bytes retornados
+print("5) O total de bytes retornados é: " + str('{0:,}'.format(df['Bytes'].sum()).replace(',','.')))
+
+----- OUTPUTS: -----
+
+1) Número de hosts únicos: 81.982
+
+2) Total de erros 404: 10.832
+ 
+3) As 5 URLs que mais causaram erros são:
+                              
+Host	                      HTTP
+hoohoo.ncsa.uiuc.edu	      251
+jbiagioni.npt.nuwc.navy.mil	  131
+piweba3y.prodigy.com	      109
+piweba1y.prodigy.com	      92
+phaelon.ksc.nasa.gov	      64
+
+4) As quantidades de erros 404 nos 20 últimos dias foram:
+            
+Timestamp	HTTP
+28/Jul/1995	94
+27/Jul/1995	336
+26/Jul/1995	336
+25/Jul/1995	461
+24/Jul/1995	328
+23/Jul/1995	233
+22/Jul/1995	191
+21/Jul/1995	332
+20/Jul/1995	428
+19/Jul/1995	638
+18/Jul/1995	465
+17/Jul/1995	406
+16/Jul/1995	257
+15/Jul/1995	254
+14/Jul/1995	411
+13/Jul/1995	531
+12/Jul/1995	470
+11/Jul/1995	471
+10/Jul/1995	398
+09/Jul/1995	348
+
+5) O total de bytes retornados é: 38.695.968.546
